@@ -7,6 +7,11 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+# Matplotlib CJK Font Configuration (防止中文方塊亂碼)
+plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei', 'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Microsoft YaHei', 'PingFang SC', 'DejaVu Sans', 'sans-serif']
+plt.rcParams['axes.unicode_minus'] = False
+
 from scipy.special import comb
 import json
 
@@ -2007,13 +2012,16 @@ elif menu == "🔄 系統級冗餘可靠度計算 (Redundancy Calculator)":
         fig_r.patch.set_facecolor('#0E1117')
         ax_r.set_facecolor('#1E222D')
         
-        ax_r.plot(t_arr, r_single_arr, 'r--', label=f'1. 單一組件無冗餘 (Single Unit MTTF={int(unit_mttf):,}h)', lw=1.8)
-        ax_r.plot(t_arr, r_toy_arr, 'g:', label=f'2. 簡化玩具模型 (Toy Model: 0% CCF, 100% Switch)', lw=2.0)
-        ax_r.plot(t_arr, r_real_mission, 'b-', label=f'3. 工業實務模型 (Real-World: CCF={ccf_input*100:.1f}%, P_switch={switch_rel_input*100:.1f}%)', lw=2.5)
+        # 提取架構英文簡稱以確保圖表字體在所有雲端伺服器皆清晰正常
+        mode_en = "1-out-of-2" if "1-out-of-2" in redundancy_mode else ("2-out-of-3" if "2-out-of-3" in redundancy_mode else ("1-out-of-3" if "1-out-of-3" in redundancy_mode else "Series"))
         
-        ax_r.set_title(f"可靠度衰減歷程對比: {c_row['name_zh']} ({redundancy_mode})", fontsize=13, color='#61AFEF')
-        ax_r.set_xlabel("任務運轉時間 (小時 / Operating Hours)", color='#E0E0E0')
-        ax_r.set_ylabel("系統可靠度 R_sys(t)", color='#E0E0E0')
+        ax_r.plot(t_arr, r_single_arr, 'r--', label=f'1. Single Unit (No Redundancy, MTTF={int(unit_mttf):,}h)', lw=1.8)
+        ax_r.plot(t_arr, r_toy_arr, 'g:', label=f'2. Simplified Toy Model (0% CCF, 100% Switch)', lw=2.0)
+        ax_r.plot(t_arr, r_real_mission, 'b-', label=f'3. Real-World Model (CCF={ccf_input*100:.1f}%, P_switch={switch_rel_input*100:.1f}%)', lw=2.5)
+        
+        ax_r.set_title(f"Reliability Comparison: {c_row['name_en']} ({mode_en})", fontsize=13, color='#61AFEF')
+        ax_r.set_xlabel("Mission Operating Time (Hours)", color='#E0E0E0')
+        ax_r.set_ylabel("System Reliability R_sys(t)", color='#E0E0E0')
         ax_r.set_ylim([-0.05, 1.05])
         ax_r.tick_params(colors='#ABB2BF')
         ax_r.grid(True, alpha=0.3, color='#3E4451')
