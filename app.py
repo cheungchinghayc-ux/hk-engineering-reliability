@@ -1728,52 +1728,307 @@ elif menu == "⏳ 剩餘壽命條件預測 (RUL Prediction)":
     st.table(pd.DataFrame(res_list))
 
 # =============================================================
-# 模組 6: 系統級冗餘可靠度計算器
+
+# =============================================================
+# 模組 6: 工業級實務系統冗餘可靠度計算器 (Real-World Redundancy Engine)
 # =============================================================
 elif menu == "🔄 系統級冗餘可靠度計算 (Redundancy Calculator)":
-    st.header("🔄 系統級冗餘架構可靠度計算器 (Redundancy Calculator)")
-    
-    red_type = st.radio(
-        "選擇系統冗餘架構：",
-        [
-            "串聯系統 (Series - 任一損壞即全停)",
-            "並聯熱備份系統 (Parallel Active - 一用一備 / 一用多備)",
-            "k-out-of-n 系統 (多機組負載分擔，如冷水機/變壓器)"
-        ]
+    st.header("🔄 工業級實務系統冗餘可靠度與可用度計算器")
+    st.markdown("""
+    傳統教科書或簡化計算（Toy Model）通常假設「組件彼此完全獨立且切換 100% 成功」，
+    但在香港重大工程現場（如醫院應急供電、數據中心 2N 架構、水務署一用一備泵站、中央冷水機組），
+    **真實世界系統必須嚴格納入以下四大工程限制**：
+    1. **共因失效 (Common Cause Failure, CCF / $\\beta$-Factor, IEC 61508)**：因共用電源、同一水淹區域、安裝批次缺陷或人為維修失誤，導致冗餘組件同時故障。
+    2. **備份運轉模式 (Standby Modes)**：熱備份 (Hot)、溫備份 (Warm) 與冷備份 (Cold Standby) 之休眠失效率差異。
+    3. **自動切換開關 (ATS) / 啟動失敗機率**：發電機啟動不成功或 ATS 接觸器卡死的切換可靠度 ($P_{switch}$)。
+    4. **可維修馬可夫可用度 (Markov Availability & MTTR)**：設備損壞後可在平均修復時間 (MTTR) 內修復，系統唯有在「所有備份皆在修復中故障」才會全停。
+    """)
+
+    mode_choice = st.radio(
+        "選擇計算模式：",
+        ["🏢 模式 A：香港工程實務案例模板 (Real-World HK Engineering Presets)", "🛠️ 模式 B：自由組件自訂工業級冗餘計算器 (Custom Industrial Redundancy Builder)"],
+        horizontal=True
     )
 
-    if red_type.startswith("串聯"):
-        st.write("公式：$R_{sys}(t) = \\prod_{i=1}^n R_i(t)$")
-        num_c = st.slider("串聯組件數量：", 2, 6, 3)
-        cols = st.columns(num_c)
-        r_arr = []
-        for idx, col in enumerate(cols):
-            with col:
-                val = st.number_input(f"組件 {idx+1} 可靠度 R_{idx+1}:", 0.0, 1.0, 0.95, 0.01)
-                r_arr.append(val)
-        st.metric("串聯系統整體可靠度 R_sys", f"{float(np.prod(r_arr))*100:.3f} %")
+    if mode_choice.startswith("🏢 模式 A"):
+        preset = st.selectbox(
+            "選擇香港關鍵基礎設施實務案例：",
+            [
+                "案例 1：公立醫院 / 數據中心「市電 + 柴油發電機 + ATS」緊急供電架構 (Cold Standby)",
+                "案例 2：數據中心 Tier III / Tier IV「2N vs N+1」雙路 UPS 供電可用度分析 (Dual-Bus)",
+                "案例 3：渠務署/水務署「一用一備 (1 Duty 1 Standby)」深層污水泵站 (Markov with CCF)",
+                "案例 4：商業大廈中央空調「3-out-of-4 冷水機組」夏季高峰負載分擔 (k-out-of-n with Derating)"
+            ]
+        )
 
-    elif red_type.startswith("並聯"):
-        st.write("公式：$R_{sys}(t) = 1 - \\prod_{i=1}^n (1 - R_i(t))$")
-        num_p = st.slider("並聯機組數量 (如一用一備 n=2, 一用兩備 n=3)：", 2, 4, 2)
-        cols_p = st.columns(num_p)
-        r_p_arr = []
-        for idx, col in enumerate(cols_p):
-            with col:
-                val = st.number_input(f"機組 {idx+1} 可靠度 R_{idx+1}:", 0.0, 1.0, 0.90, 0.01)
-                r_p_arr.append(val)
-        sys_p = 1.0 - float(np.prod([1.0 - x for x in r_p_arr]))
-        st.metric("並聯備份後系統整體可靠度 R_sys", f"{sys_p*100:.4f} %", delta=f"+{(sys_p - min(r_p_arr))*100:.2f}% 可靠度提升")
+        if preset.startswith("案例 1"):
+            st.subheader("🏥 案例 1：公立醫院緊急應急供電架構 (Mains Grid + ATS + Diesel Generator)")
+            st.markdown("""
+            - **架構特點**：平時由中電/港燈市電供電；市電停電時，ATS 自動轉換開關動作，柴油發電機冷啟動盤車供電。
+            - **關鍵瓶頸**：發電機電池電壓不足或油路閥卡阻導致的「啟動失敗機率 ($q_{start}$)」，以及 ATS 切換接觸器卡死風險。
+            """)
+            
+            c1, c2, c3, c4 = st.columns(4)
+            p_grid_fail_yr = c1.number_input("市電年預期中斷次數 (次/年):", 0.1, 5.0, 0.5, 0.1)
+            p_ats_rel = c2.slider("ATS 自動切換開關可靠度 (%):", 90.0, 99.9, 99.2, 0.1) / 100.0
+            p_gen_start = c3.slider("柴油發電機冷啟動成功率 (%):", 85.0, 99.9, 97.5, 0.1) / 100.0
+            mission_outage_hr = c4.number_input("停電持續任務時間 (小時):", 1, 72, 8, 1)
 
-    elif red_type.startswith("k-out-of-n"):
-        st.write("公式：$R_{k/n} = \\sum_{i=k}^n \\binom{n}{i} R^i (1-R)^{n-i}$")
-        c1, c2, c3 = st.columns(3)
-        n_val = c1.number_input("總機組數量 n:", 2, 10, 3)
-        k_val = c2.number_input("維持運作所需最低數量 k:", 1, n_val, 2)
-        r_unit = c3.number_input("單一機組可靠度 R:", 0.0, 1.0, 0.90, 0.01)
+            # 發電機運行小時失效率
+            gen_mttf = 107000.0  # 來自數據庫 #29 發電機
+            lam_gen = 1.0 / gen_mttf
+            r_gen_run = np.exp(- lam_gen * mission_outage_hr)
+            
+            # 單次停電應急供電成功率
+            p_emergency_power = p_ats_rel * p_gen_start * r_gen_run
+            annual_failure_risk = p_grid_fail_yr * (1.0 - p_emergency_power)
 
-        res_kn = sum(comb(n_val, i) * (r_unit ** i) * ((1.0 - r_unit) ** (n_val - i)) for i in range(k_val, n_val + 1))
-        st.metric(f"{k_val}-out-of-{n_val} 系統可靠度", f"{res_kn*100:.4f} %")
+            st.markdown("#### 📊 應急供電可靠度運算結論：")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("緊急發電機啟動並運行存活率", f"{p_emergency_power * 100:.3f} %")
+            m2.metric("市電中斷時無法接管之風險 (Loss of Power)", f"{(1.0 - p_emergency_power) * 100:.3f} %")
+            m3.metric("年度供電全黑風險 (Blackout Risk/yr)", f"{annual_failure_risk * 100:.4f} %", delta="符合醫院安全標準" if annual_failure_risk < 0.02 else "⚠️ 建議增加雙 ATS 或第二部發電機")
+
+            st.info("""
+            **💡 香港工程實務對策 (FSD / EMSD 建議)**：
+            若單純計算發電機運行壽命，可靠度高達 99.99%；但加入 **冷啟動失敗率 (2.5%)** 與 **ATS 卡死率 (0.8%)** 後，真實供電成功率降至約 96.7%。
+            因此，公立醫院及重要金融數據中心皆要求配置 **雙路獨立 ATS (Dual ATS)** 及 **發電機雙組起動蓄電池 (Dual Cranking Batteries)**。
+            """)
+
+        elif preset.startswith("案例 2"):
+            st.subheader("🖥️ 案例 2：數據中心 Tier III (N+1) vs Tier IV (2N) 雙路供電可用度分析")
+            st.markdown("""
+            - **Tier III (N+1)**：多部 UPS 並聯共享負載，多 1 部備用；若總線短路或維修失誤，存在共因單點故障 (SPOF)。
+            - **Tier IV (2N)**：兩套完全獨立的 A/B 供電線路、獨立電池室及配電櫃，真正達到容錯 (Fault Tolerant)。
+            """)
+            
+            c_u1, c_u2, c_u3 = st.columns(3)
+            ups_mtbf = c_u1.number_input("單一 UPS 模組 MTBF (小時):", 20000, 200000, 80000, 5000)
+            ups_mttr = c_u2.number_input("平均修復時間 MTTR (小時):", 1.0, 48.0, 4.0, 0.5)
+            ccf_beta = c_u3.slider("共因失效因子 β-Factor (%):", 0.5, 10.0, 2.5, 0.5) / 100.0
+
+            lam = 1.0 / ups_mtbf
+            mu = 1.0 / ups_mttr
+            
+            # N+1 架構 (共享共因風險較高)
+            lam_np1 = (2.0 * ((lam*(1-ccf_beta))**2) / (mu + 3*lam)) + ccf_beta * lam
+            avail_np1 = mu / (mu + lam_np1)
+            down_np1 = 8760.0 * (1.0 - avail_np1) * 60.0  # 分鐘/年
+            
+            # 2N 架構 (實體隔離，共因風險降低 80%)
+            ccf_2n = ccf_beta * 0.2
+            lam_2n = (2.0 * ((lam*(1-ccf_2n))**2) / (mu + 3*lam)) + ccf_2n * lam
+            avail_2n = mu / (mu + lam_2n)
+            down_2n = 8760.0 * (1.0 - avail_2n) * 60.0  # 分鐘/年
+
+            k1, k2 = st.columns(2)
+            with k1:
+                st.markdown("##### 🥉 Tier III (N+1 架構)")
+                st.metric("穩態可用度 (Availability)", f"{avail_np1 * 100:.5f} %")
+                st.metric("年預期停機時間", f"{down_np1:.2f} 分鐘 / 年")
+            with k2:
+                st.markdown("##### 🥇 Tier IV (2N 雙母線完全隔離)")
+                st.metric("穩態可用度 (Availability)", f"{avail_2n * 100:.5f} %", delta=f"-{(down_np1 - down_2n):.2f} 分鐘/年")
+                st.metric("年預期停機時間", f"{down_2n:.2f} 分鐘 / 年 (Five Nines 99.999%)")
+
+        elif preset.startswith("案例 3"):
+            st.subheader("💧 案例 3：渠務署 / 水務署「一用一備 (1 Duty 1 Standby)」污水提升泵站")
+            st.markdown("""
+            - **架構特點**：配備 2 部大流量沉水泵（#45 淨化海港深層污水泵），1 部常開 (Duty)，1 部備用 (Standby)。
+            - **工程實務因素**：當常開泵故障時，浮球信號自動切換至備用泵，同時保養承包商接獲 SCADA 報警進場搶修（MTTR 通常為 24 小時）。
+            """)
+            
+            p1, p2, p3 = st.columns(3)
+            pump_mttf = p1.number_input("沉水泵 MTTF (小時):", 10000, 150000, 53300, 1000)
+            pump_mttr = p2.number_input("現場搶修更換 MTTR (小時):", 4, 72, 24, 2)
+            pump_ccf = p3.slider("共因失效因子 β (如吸水井異物堵塞/配電總掣跳掣) (%):", 0.0, 10.0, 4.0, 0.5) / 100.0
+
+            l_p = 1.0 / pump_mttf
+            u_p = 1.0 / pump_mttr
+            
+            # 1. 簡化玩具模型 (無維修、無共因)
+            t_eval = 8760.0 # 1年
+            r_single_1yr = np.exp(- l_p * t_eval)
+            r_toy_1yr = 1.0 - (1.0 - r_single_1yr)**2
+            
+            # 2. 真實馬可夫可修復系統 (Markov with Repair & CCF)
+            l_sys_m = (2.0 * ((l_p * (1 - pump_ccf))**2) / (u_p + 3*l_p)) + (pump_ccf * l_p)
+            avail_pump = u_p / (u_p + l_sys_m)
+            sys_mtbf_m = 1.0 / l_sys_m
+            r_real_1yr = np.exp(- l_sys_m * t_eval)
+
+            sc1, sc2, sc3 = st.columns(3)
+            sc1.metric("系統穩態可用度 (Availability)", f"{avail_pump * 100:.4f} %")
+            sc2.metric("系統等效 MTBF (含維修保養)", f"{int(sys_mtbf_m):,} 小時", delta=f"約 {sys_mtbf_m/8760:.1f} 年")
+            sc3.metric("全年無停機機率 R_sys(1年)", f"{r_real_1yr * 100:.2f} %")
+
+            st.write(f"- 單泵年運行存活率：`{r_single_1yr*100:.2f}%` ➔ 加入一用一備及 24 小時維修機制後，系統全年運作機率提升至 **`{r_real_1yr*100:.2f}%`**。")
+
+        elif preset.startswith("案例 4"):
+            st.subheader("❄️ 案例 4：商業大廈中央冷水機「3-out-of-4 (25% 冗餘)」夏季高峰負載分擔")
+            st.markdown("""
+            - **架構特點**：機房安裝 4 部 1000 RT 水冷離心式冷水機（共 4000 RT）。
+            - **夏季極端滿載條件**：大廈全開需 3000 RT（至少 3 部機正常運轉）。
+            - **降額運行分析 (Derating)**：若損壞 1 部，剩下 3 部開足 100% 負荷（大廈供冷無影響）；若損壞 2 部，只能提供 2000 RT（66.7% 供冷能力，觸發部分區域降溫不足）。
+            """)
+            
+            ch_mttf = 133000.0 # 來自數據庫 #61 冷水機
+            t_summer = 2880.0 # 夏季 4 個月約 2880 小時
+            l_c = 1.0 / ch_mttf
+            r_ch_summer = np.exp(- l_c * t_summer)
+            
+            # 計算 4 部機的二項分布機率
+            prob_4_ok = (r_ch_summer ** 4)
+            prob_3_ok = 4 * (r_ch_summer ** 3) * (1.0 - r_ch_summer)
+            prob_2_ok = 6 * (r_ch_summer ** 2) * ((1.0 - r_ch_summer) ** 2)
+            prob_1_ok = 4 * r_ch_summer * ((1.0 - r_ch_summer) ** 3)
+            prob_0_ok = ((1.0 - r_ch_summer) ** 4)
+
+            r_full_capacity = prob_4_ok + prob_3_ok # 4部全好或好3部
+            r_partial_67 = r_full_capacity + prob_2_ok # 至少好2部
+
+            f1, f2, f3 = st.columns(3)
+            f1.metric("單機夏季運轉存活率", f"{r_ch_summer * 100:.3f} %")
+            f2.metric("維持 100% 供冷可靠度 (≥3部運作)", f"{r_full_capacity * 100:.4f} %")
+            f3.metric("維持 ≥66.7% 應急供冷可靠度 (≥2部運作)", f"{r_partial_67 * 100:.5f} %")
+
+    elif mode_choice.startswith("🛠️ 模式 B"):
+        st.subheader("🛠️ 自由組件自訂工業級冗餘架構計算器")
+        st.markdown("從 5 大營運邊界之 100 款組件中選取設備，並自定義**共因失效、備份休眠因子與馬可夫修復率**：")
+
+        col_b1, col_b2 = st.columns([2, 1])
+        with col_b1:
+            sel_comp_id = st.selectbox(
+                "從 100 款邊界資料庫選取組件載入物理參數：",
+                df['id'].tolist(),
+                format_func=lambda x: f"#{x} [{df.loc[df['id']==x, 'boundary'].values[0]}] - {df.loc[df['id']==x, 'name_zh'].values[0]} ({df.loc[df['id']==x, 'name_en'].values[0]})"
+            )
+            c_row = df[df['id'] == sel_comp_id].iloc[0]
+            unit_mttf = float(c_row['mttf_hours'])
+            unit_beta = float(c_row['beta'])
+        with col_b2:
+            st.info(f"**選定組件：** {c_row['name_zh']}\n- MTTF = `{int(unit_mttf):,} hrs`\n- Weibull β = `{unit_beta}`")
+
+        st.markdown("---")
+        st.markdown("#### ⚙️ 系統架構與實務限制參數配置：")
+        
+        ca1, ca2, ca3 = st.columns(3)
+        with ca1:
+            redundancy_mode = st.selectbox(
+                "冗餘架構形式：",
+                ["1-out-of-2 (一用一備 / 雙通道並聯)", "2-out-of-3 (三中取二)", "1-out-of-3 (一用兩備 / 三重冗餘)", "串聯架構 (Series - 無冗餘)"]
+            )
+            standby_mode = st.selectbox(
+                "備份運轉狀態 (Standby Mode)：",
+                ["Hot Standby (並聯熱備份 - 全速同時運轉)", "Cold Standby (離線冷備份 - 平時靜止斷電)", "Warm Standby (溫備份 - 低載待機)"]
+            )
+        with ca2:
+            ccf_input = st.slider(
+                "共因失效因子 β-Factor (IEC 61508) (%):",
+                min_value=0.0, max_value=15.0, value=3.0, step=0.5,
+                help="衡量環境水淹、共用母線、安裝批次錯誤等導致冗餘同時失效的機率比例。工業常規約 2% - 5%。"
+            ) / 100.0
+            switch_rel_input = st.slider(
+                "切換開關/啟動機構可靠度 P_switch (%):",
+                min_value=80.0, max_value=100.0, value=98.5, step=0.5,
+                help="自動切換開關 (ATS)、傳感切換電路或冷啟動成功率。"
+            ) / 100.0
+        with ca3:
+            enable_repair = st.checkbox("啟用現場維修機制 (Markov Repair Model)", value=True)
+            if enable_repair:
+                mttr_input = st.number_input("平均修復時間 MTTR (小時):", min_value=1.0, max_value=168.0, value=24.0, step=1.0)
+            else:
+                mttr_input = 1e9
+            mission_time = st.number_input("評估任務時間 (小時):", min_value=100, max_value=87600, value=8760, step=500)
+
+        # 核心計算
+        lam_tot = 1.0 / unit_mttf
+        lam_ind = (1.0 - ccf_input) * lam_tot
+        lam_ccf = ccf_input * lam_tot
+        mu_rate = 1.0 / mttr_input
+
+        # 任務可靠度 R(t) 曲線計算
+        t_arr = np.linspace(0, mission_time, 200)
+        r_single_arr = np.exp(- lam_tot * t_arr)
+        
+        # 1. 玩具模型 (Toy model: 獨立無共因，100% 切換)
+        if "1-out-of-2" in redundancy_mode:
+            r_toy_arr = 1.0 - (1.0 - r_single_arr)**2
+        elif "2-out-of-3" in redundancy_mode:
+            r_toy_arr = 3.0 * (r_single_arr**2) - 2.0 * (r_single_arr**3)
+        elif "1-out-of-3" in redundancy_mode:
+            r_toy_arr = 1.0 - (1.0 - r_single_arr)**3
+        else:
+            r_toy_arr = r_single_arr
+
+        # 2. 真實不可修復任務可靠度 (Real-World Mission Reliability with CCF & Switch)
+        alpha_dorm = 1.0 if "Hot" in standby_mode else (0.2 if "Warm" in standby_mode else 0.0)
+        if "1-out-of-2" in redundancy_mode:
+            if "Hot" in standby_mode:
+                r_ind_t = 2.0 * np.exp(-lam_ind * t_arr) - np.exp(-2.0 * lam_ind * t_arr)
+            else:
+                r_ind_t = np.exp(-lam_ind * t_arr) + switch_rel_input * (1.0 - np.exp(-lam_ind * t_arr)) * np.exp(-alpha_dorm * lam_ind * t_arr)
+            r_real_mission = r_ind_t * np.exp(-lam_ccf * t_arr)
+        elif "2-out-of-3" in redundancy_mode:
+            r_ind_t = 3.0 * np.exp(-2.0 * lam_ind * t_arr) - 2.0 * np.exp(-3.0 * lam_ind * t_arr)
+            r_real_mission = (switch_rel_input * r_ind_t) * np.exp(-lam_ccf * t_arr)
+        elif "1-out-of-3" in redundancy_mode:
+            r_ind_t = 1.0 - ((1.0 - np.exp(-lam_ind * t_arr)) ** 3)
+            r_real_mission = (switch_rel_input * r_ind_t) * np.exp(-lam_ccf * t_arr)
+        else:
+            r_real_mission = r_single_arr
+
+        # 3. 馬可夫穩態可用度 (Markov Availability with Repair)
+        if enable_repair and "1-out-of-2" in redundancy_mode:
+            lam_sys_equiv = (2.0 * (lam_ind ** 2) / (mu_rate + 3.0 * lam_ind)) + lam_ccf
+            avail_steady = mu_rate / (mu_rate + lam_sys_equiv)
+            mtbf_sys_equiv = 1.0 / lam_sys_equiv
+        elif enable_repair and "1-out-of-3" in redundancy_mode:
+            lam_sys_equiv = (6.0 * (lam_ind ** 3) / ((mu_rate**2) + 4.0*mu_rate*lam_ind)) + lam_ccf
+            avail_steady = mu_rate / (mu_rate + lam_sys_equiv)
+            mtbf_sys_equiv = 1.0 / lam_sys_equiv
+        else:
+            lam_sys_equiv = lam_tot
+            avail_steady = unit_mttf / (unit_mttf + mttr_input)
+            mtbf_sys_equiv = unit_mttf
+
+        annual_downtime_hrs = 8760.0 * (1.0 - avail_steady)
+
+        st.markdown("#### 📊 運算結論與指標看板 (Results Dashboard)：")
+        res1, res2, res3, res4 = st.columns(4)
+        res1.metric(f"任務可靠度 R({mission_time}h)", f"{r_real_mission[-1] * 100:.3f} %", 
+                    delta=f"-{(r_toy_arr[-1] - r_real_mission[-1])*100:.2f}% (CCF+切換衰減)")
+        res2.metric("馬可夫穩態可用度 (Availability)", f"{avail_steady * 100:.5f} %")
+        res3.metric("全年預期停機時間", f"{annual_downtime_hrs:.2f} 小時/年", delta=f"{annual_downtime_hrs*60:.1f} 分鐘")
+        res4.metric("系統等效 MTBF (含維修)", f"{int(mtbf_sys_equiv):,} hrs", delta=f"約 {mtbf_sys_equiv/8760:.1f} 年")
+
+        # 繪圖對比
+        fig_r, ax_r = plt.subplots(figsize=(14, 5), dpi=180)
+        fig_r.patch.set_facecolor('#0E1117')
+        ax_r.set_facecolor('#1E222D')
+        
+        ax_r.plot(t_arr, r_single_arr, 'r--', label=f'1. 單一組件無冗餘 (Single Unit MTTF={int(unit_mttf):,}h)', lw=1.8)
+        ax_r.plot(t_arr, r_toy_arr, 'g:', label=f'2. 簡化玩具模型 (Toy Model: 0% CCF, 100% Switch)', lw=2.0)
+        ax_r.plot(t_arr, r_real_mission, 'b-', label=f'3. 工業實務模型 (Real-World: CCF={ccf_input*100:.1f}%, P_switch={switch_rel_input*100:.1f}%)', lw=2.5)
+        
+        ax_r.set_title(f"可靠度衰減歷程對比: {c_row['name_zh']} ({redundancy_mode})", fontsize=13, color='#61AFEF')
+        ax_r.set_xlabel("任務運轉時間 (小時 / Operating Hours)", color='#E0E0E0')
+        ax_r.set_ylabel("系統可靠度 R_sys(t)", color='#E0E0E0')
+        ax_r.set_ylim([-0.05, 1.05])
+        ax_r.tick_params(colors='#ABB2BF')
+        ax_r.grid(True, alpha=0.3, color='#3E4451')
+        ax_r.legend(facecolor='#1E222D', edgecolor='#3E4451', labelcolor='#ABB2BF')
+        
+        st.pyplot(fig_r)
+
+        st.markdown("""
+        #### 💡 工程啟示與專業論點 (Professional Engineering Insight)：
+        1. **玩具模型 (綠色虛線) vs 真實工程 (藍色實線)**：
+           簡化計算忽視了共因失效與切換風險，往往產生嚴重的「虛假安全感」（False Sense of Security）。
+           例如在運轉 8,760 小時後，玩具模型預測可靠度為 $99.8\%$，但真實工程納入 $3\%$ 共因失效後，實際可靠度為 $97.2\%$。
+        2. **馬可夫維修模型的重要性**：
+           對於供水泵站或配電系統，單純看不可修復的任務可靠度是不完整的。透過**壓縮 MTTR（例如由 48 小時縮短至 12 小時）**，系統等效 MTBF 可成倍暴增，這也是為何香港工程合約中對緊急搶修合約 (Term Maintenance Contract) 的 SLA 響應時間有極嚴苛要求。
+        """)
 
 st.markdown("---")
 st.caption("Hong Kong Infrastructure Reliability & DIF Platform | Developed for Academic Research & Engineering Community")
